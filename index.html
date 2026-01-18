@@ -1,1 +1,109 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TECA Brain - Sistema de Decisão Logística</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .card-action { cursor: pointer; transition: 0.3s; }
+        .card-action:hover { transform: translateY(-5px); shadow: 0 4px 8px rgba(0,0,0,0.2); }
+        .bg-gradient-warning { background: linear-gradient(45deg, #ffc107, #ffdb4d); }
+        .bg-gradient-danger { background: linear-gradient(45deg, #dc3545, #ff6b6b); color: white; }
+        .bg-gradient-success { background: linear-gradient(45deg, #198754, #28a745); color: white; }
+        .nav-pills .nav-link.active { background-color: #ff6600; } /* Cor Laranja Logística */
+        .nav-link { color: #333; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body class="bg-light">
 
+<div class="container py-4">
+    <header class="pb-3 mb-4 border-bottom d-flex justify-content-between align-items-center">
+        <h1 class="h3 text-dark">🧠 TECA Brain <span class="text-muted fs-6">| Assistente de Decisão</span></h1>
+        <button class="btn btn-sm btn-outline-secondary" onclick="window.location.reload()">Limpar Dados</button>
+    </header>
+
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <label class="form-label fw-bold">1. Carregar CSV de Cargas (Estoque)</label>
+            <input type="file" id="fileCargas" class="form-control" accept=".csv">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label fw-bold">2. Carregar CSV de Voos (Malha)</label>
+            <input type="file" id="fileVoos" class="form-control" accept=".csv">
+        </div>
+    </div>
+
+    <ul class="nav nav-pills mb-3" id="pills-tab" role="tablist">
+        <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#dash">Dashboard</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#enderecamento">Endereçamento (Entrada)</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#auditoria">Auditoria (Fiscal)</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#expedicao">Expedição (Saída)</button></li>
+    </ul>
+
+    <div class="tab-content" id="pills-tabContent">
+        
+        <div class="tab-pane fade show active" id="dash">
+            <div class="row g-3" id="stats-container">
+                <div class="col-12 text-center text-muted py-5">
+                    <h4>Aguardando arquivos CSV...</h4>
+                    <p>Carregue os arquivos acima para ativar o cérebro.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="enderecamento">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title">Onde guardar esta carga?</h5>
+                    <div class="input-group mb-3">
+                        <span class="input-group-text">🔎</span>
+                        <input type="text" id="inputBuscaAWB" class="form-control" placeholder="Digite AWB, Destino ou Serviço (Simulação de Bipagem)">
+                        <button class="btn btn-primary" onclick="buscarSugestao()">Consultar</button>
+                    </div>
+                    <div id="resultadoSugestao" class="alert alert-secondary d-none">
+                        </div>
+                    
+                    <h6 class="mt-4">Cargas sem Endereço (Prioritárias)</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover">
+                            <thead><tr><th>AWB</th><th>Destino</th><th>Serviço</th><th>Peças/Peso</th><th>Sugestão</th></tr></thead>
+                            <tbody id="listaSemEndereco"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="auditoria">
+            <div class="row">
+                <div class="col-md-12">
+                    <div class="alert alert-danger d-none" id="alertaAuditoria">
+                        <strong>Atenção!</strong> Foram encontrados erros graves de mistura de cargas.
+                    </div>
+                    <div id="listaErros"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="expedicao">
+            <div class="card">
+                <div class="card-header bg-dark text-white">Planejamento de Voo</div>
+                <div class="card-body">
+                    <select id="selectVoo" class="form-select mb-3" onchange="analisarVoo()">
+                        <option selected>Selecione um voo...</option>
+                    </select>
+                    
+                    <div id="analiseVooResult" class="d-none">
+                        </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
