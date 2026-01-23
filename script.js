@@ -85,69 +85,6 @@ function buildBadge(text, className) {
   return span;
 }
 
-function buildMiniPieChart(data, colors = ["#111111", "#d6d6d6"]) {
-  // data: array de {label, value} ou array de valores [value1, value2, ...]
-  let items = Array.isArray(data) && data.length > 0 && typeof data[0] === 'object' 
-    ? data 
-    : data.map((v, i) => ({ label: i === 0 ? 'OK' : 'Pendente', value: v }));
-
-  const totalValue = items.reduce((sum, i) => sum + (i.value || 0), 0);
-  if (totalValue === 0) return null;
-
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 100 100");
-  svg.setAttribute("width", "90");
-  svg.setAttribute("height", "90");
-  svg.style.display = "block";
-  svg.style.margin = "0 auto";
-
-  let currentAngle = -90;
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    const sliceAngle = (item.value / totalValue) * 360;
-    const startAngle = currentAngle * (Math.PI / 180);
-    const endAngle = (currentAngle + sliceAngle) * (Math.PI / 180);
-
-    const x1 = 50 + 35 * Math.cos(startAngle);
-    const y1 = 50 + 35 * Math.sin(startAngle);
-    const x2 = 50 + 35 * Math.cos(endAngle);
-    const y2 = 50 + 35 * Math.sin(endAngle);
-
-    const largeArc = sliceAngle > 180 ? 1 : 0;
-
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", `M 50 50 L ${x1} ${y1} A 35 35 0 ${largeArc} 1 ${x2} ${y2} Z`);
-    path.setAttribute("fill", colors[i % colors.length]);
-    path.setAttribute("stroke", "#fff");
-    path.setAttribute("stroke-width", "0.5");
-    
-    svg.appendChild(path);
-    currentAngle += sliceAngle;
-  }
-
-  // Círculo central
-  const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-  circle.setAttribute("cx", "50");
-  circle.setAttribute("cy", "50");
-  circle.setAttribute("r", "15");
-  circle.setAttribute("fill", "#fff");
-  svg.appendChild(circle);
-
-  // Texto no centro
-  const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-  text.setAttribute("x", "50");
-  text.setAttribute("y", "55");
-  text.setAttribute("text-anchor", "middle");
-  text.setAttribute("font-size", "12");
-  text.setAttribute("font-weight", "700");
-  text.setAttribute("fill", "#111");
-  const percentage = Math.round((items[0].value / totalValue) * 100);
-  text.textContent = `${percentage}%`;
-  svg.appendChild(text);
-
-  return svg;
-}
-
 function buildShcElement(shcCode) {
   const span = document.createElement("span");
   span.className = "mono";
@@ -311,16 +248,6 @@ function parseMultiplosEnderecos(raw) {
   }
 
   return result;
-}
-
-// Soma total de volumes endereçados em uma AWB
-function sumVolumesEnderecoados(raw) {
-  const parsed = parseMultiplosEnderecos(raw);
-  let total = 0;
-  for (const vols of parsed.values()) {
-    total += vols;
-  }
-  return total;
 }
 
 function formatLocalizacao(raw) {
@@ -924,7 +851,17 @@ function analyzeEnderecoGroup(rows) {
   }
 
   const dataMixed = datas.size > 1;
-  const servMixed = servicoGroups.size > 1;
+  
+  // Verificar se serviço é realmente diferente
+  // URGENTE e URGENTE/KG são considerados o mesmo
+  const normalizeServiceGroup = (sg) => {
+    const s = (sg || "").toString().toUpperCase();
+    if (s.includes("URGENTE")) return "URGENTE";
+    return s;
+  };
+  const normalizedServGroups = new Set(Array.from(servicoGroups).map(normalizeServiceGroup));
+  const servMixed = normalizedServGroups.size > 1;
+  
   const destMixed = destinosKey.size > 1;
   const shcMixed = shcKeys.size > 1;
   const shcConflict = analyzeShcConflict(shcTokens);
@@ -1643,17 +1580,62 @@ function renderEnderecoModal(endereco, rows) {
     tdKg.className = "mono text-end";
     tdKg.textContent = formatNumber(r.peso);
 
+    // Coluna de endereço sugerido
+    const tdSugerido = document.createElement("td");
+    tdSugerido.className = "mono";
+    const enderecoSugerido = buscarEnderecoParaAwb(r, endereco);
+    
+    if (enderecoSugerido) {
+      const link = document.createElement("a");
+      link.href = "#";
+      link.className = "text-reset ds-link";
+      link.textContent = enderecoSugerido;
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        openEnderecoModal(enderecoSugerido);
+      });
+      tdSugerido.appendChild(link);
+    } else {
+      tdSugerido.style.color = "var(--ds-muted)";
+      tdSugerido.style.fontStyle = "italic";
+      tdSugerido.textContent = "Sem sugestão";
+    }
+
     tr.appendChild(tdId);
     tr.appendChild(tdDest);
     tr.appendChild(tdData);
     tr.appendChild(tdServ);
     tr.appendChild(tdShc);
     tr.appendChild(tdKg);
+    tr.appendChild(tdSugerido);
 
     frag.appendChild(tr);
   }
 
   tbody.appendChild(frag);
+}
+
+function buscarEnderecoParaAwb(row, enderecoAtual) {
+  // Buscar um endereço que tenha AWBs com mesmo destino, data e serviço
+  const items = collectEnderecoItems();
+  
+  for (const item of items) {
+    // Pular o endereço atual
+    if (item.endereco === enderecoAtual) continue;
+    
+    // Procurar uma AWB com os mesmos dados
+    for (const itemRow of item.rows) {
+      if (
+        normalizeUpper(itemRow.destino) === normalizeUpper(row.destino) &&
+        itemRow.data === row.data &&
+        normalizeServicoCell(itemRow.servico) === normalizeServicoCell(row.servico)
+      ) {
+        return item.endereco;
+      }
+    }
+  }
+  
+  return null;
 }
 
 function openEnderecoModal(endereco) {
@@ -2296,11 +2278,34 @@ function renderPereciveisTable() {
     tdServ.className = "mono";
     tdServ.textContent = it.servico === "-" ? "" : it.servico;
 
+    // Calcular troca de gelo (48 horas após data da carga)
+    const dataMs = parsePtDateToMs(it.data);
+    let trocaGeloHoras = "-";
+    let trocaGeloClass = "";
+    if (dataMs && Number.isFinite(dataMs)) {
+      const agora = Date.now();
+      const diffMs = agora - dataMs;
+      const diffHoras = Math.round(diffMs / (60 * 60 * 1000));
+      const horasParaTroca = diffHoras - 48;
+      if (horasParaTroca >= 0) {
+        // Já passou do tempo de troca
+        trocaGeloHoras = `-${horasParaTroca}h`;
+        trocaGeloClass = "text-danger";
+      } else {
+        // Ainda faltam horas
+        trocaGeloHoras = `${Math.abs(horasParaTroca)}h`;
+      }
+    }
+    const tdTrocaGelo = document.createElement("td");
+    tdTrocaGelo.className = `mono ${trocaGeloClass}`;
+    tdTrocaGelo.textContent = trocaGeloHoras;
+
     tr.appendChild(tdId);
     tr.appendChild(tdPecas);
     tr.appendChild(tdDest);
     tr.appendChild(tdEndereco);
     tr.appendChild(tdData);
+    tr.appendChild(tdTrocaGelo);
     tr.appendChild(tdShc);
     tr.appendChild(tdServ);
     frag.appendChild(tr);
@@ -2707,11 +2712,24 @@ function buildCheckPracaHtml() {
           } else if (item?.destMixed && item?.servMixed) {
             metaHtml = `<div class="meta">DESTINO MIST.<br>SERV MIST. <span class="x">x${count}</span></div>`;
           } else {
+            // Endereço OK - mostrar data e SHCs (se houver)
             let metaText = data || "-";
             if (item?.dataMixed) metaText = "DATA MIST.";
             else if (item?.destMixed) metaText = "DESTINO MIST.";
             else if (item?.servMixed) metaText = "SERV MIST.";
-            metaHtml = `<div class="meta">${escapeHtml(metaText)} <span class="x">x${count}</span></div>`;
+            
+            // Para endereços OK (sem mistura), adicionar SHCs abaixo da data
+            let shcText = "";
+            if (!item?.dataMixed && !item?.destMixed && !item?.servMixed && item?.shcTokens && item.shcTokens.size > 0) {
+              const shcArray = Array.from(item.shcTokens).sort();
+              shcText = shcArray.join(", ");
+            }
+            
+            if (shcText) {
+              metaHtml = `<div class="meta">${escapeHtml(metaText)}<br>${escapeHtml(shcText)} <span class="x">x${count}</span></div>`;
+            } else {
+              metaHtml = `<div class="meta">${escapeHtml(metaText)} <span class="x">x${count}</span></div>`;
+            }
           }
           html += metaHtml;
         } else html += `<div class="meta">&nbsp;</div>`;
@@ -2839,8 +2857,8 @@ function buildAuditoriaHtml() {
     let html = `<h3 style="margin-top: 20px; margin-bottom: 10px; border-bottom: 2px solid #ccc; padding-bottom: 8px;">${title} (${cargas.length} cargas, ${cargas.reduce((sum, c) => sum + c.pecas, 0)} volumes)</h3>`;
     html += `<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">`;
     html += `<thead><tr style="background: #f3f3f3;">
-      <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">ID</th>
-      <th style="border: 1px solid #ccc; padding: 8px; text-align: center;">Peças</th>
+      <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">AWB</th>
+      <th style="border: 1px solid #ccc; padding: 8px; text-align: center;">Volume Registrado</th>
       <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Destino</th>
       <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Endereço</th>
       <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Localização (Raw)</th>
@@ -3052,10 +3070,6 @@ function buildOtimizacaoHtml() {
         html += `</tr>`;
       }
       
-      if (idx < list.length - 1) {
-        html += `<tr style="height: 8px; border-bottom: 2px solid #333;"><td colspan="8"></td></tr>`;
-      }
-      
       return html;
     })
     .join("\n");
@@ -3099,7 +3113,7 @@ function buildOtimizacaoHtml() {
           <th>Serviço</th>
           <th>Economia</th>
           <th>Endereço</th>
-          <th class="text-right">Peças</th>
+          <th class="text-right">Volume Registrado</th>
           <th class="text-right">Peso (kg)</th>
           <th>SHC</th>
         </tr>
@@ -3166,12 +3180,12 @@ function renderEstoquePanel() {
   setText("estoquePanelTitle", "Estoque");
   setText("estoquePanelSub", `${state.fileName || "-"} | ${state.rows.length} cargas`);
 
-  const body = $("estoquePanelBody");
-  if (!body) return;
-  body.innerHTML = "";
+  const panelBody = $("estoquePanelBody");
+  if (!panelBody) return;
+  panelBody.innerHTML = "";
 
   if (!state.rows.length) {
-    body.innerHTML = '<div class="ds-estoque-empty text-muted">Carregue um CSV para ver o estoque.</div>';
+    panelBody.innerHTML = '<div class="ds-estoque-empty text-muted">Carregue um CSV para ver o estoque.</div>';
     return;
   }
 
@@ -3193,12 +3207,10 @@ function renderEstoquePanel() {
     return `${pct}%`;
   };
 
-  const formatTop = (m, limit = 8) => {
+  const formatTop = (m) => {
     const arr = Array.from(m.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
     if (!arr.length) return "-";
-    const shown = arr.slice(0, limit).map(([k, v]) => `${k}(${v})`);
-    const rest = arr.length - shown.length;
-    return rest > 0 ? `${shown.join(", ")} +${rest}` : shown.join(", ");
+    return arr.map(([k, v]) => `${k}(${v})`).join(", ");
   };
 
   const bolsaoStats = [];
@@ -3210,6 +3222,7 @@ function renderEstoquePanel() {
     const freePos = totalPos - occupiedPos;
 
     const destinos = new Map();
+    const destinoAddresses = new Map(); // Mapear destino → endereços
     const servicos = new Map();
     let kg = 0;
     let cargas = 0;
@@ -3223,21 +3236,36 @@ function renderEstoquePanel() {
       const a = analyzeEnderecoGroup(rows);
       cargas += rows.length;
       kg += a.kg;
-      if (a.destLabel) destinos.set(a.destLabel, (destinos.get(a.destLabel) || 0) + 1);
+      if (a.destLabel) {
+        // Contar volumes (pecas) em vez de cargas
+        const volumes = rows.reduce((sum, r) => sum + (r.pecas || 1), 0);
+        destinos.set(a.destLabel, (destinos.get(a.destLabel) || 0) + volumes);
+        // Guardar endereços por destino
+        if (!destinoAddresses.has(a.destLabel)) {
+          destinoAddresses.set(a.destLabel, new Set());
+        }
+        destinoAddresses.get(a.destLabel).add(addr);
+      }
       if (a.servLabel) servicos.set(a.servLabel, (servicos.get(a.servLabel) || 0) + 1);
       if (a.anyMixed) mixed++;
       if (a.shcTokens && a.shcTokens.size) shc++;
       if (a.shcConflict) shcConflict++;
     }
 
+    const pctOcc = Math.round((occupiedPos / totalPos) * 100);
+    const pctClass = shcConflict > 0 ? "risco" : mixed > 0 ? "alerta" : "";
+
     bolsaoStats.push({
       bolsao,
       destinos: formatTop(destinos),
+      destinoAddresses,
       servicos: formatTop(new Map(Array.from(servicos.entries()).map(([k, v]) => [servicoLabelFromKey(k) || k, v]))),
       totalPos,
       occupiedPos,
       freePos,
       pct: formatPct(occupiedPos, totalPos),
+      pctNum: pctOcc,
+      pctClass,
       kg,
       cargas,
       mixed,
@@ -3293,38 +3321,111 @@ function renderEstoquePanel() {
   for (const b of bolsaoStats) {
     const card = document.createElement("article");
     card.className = "ds-estoque-bolsao-card";
-    const destinos = escapeHtml(b.destinos || "-");
     const servicos = escapeHtml(b.servicos || "-");
+    
     card.innerHTML = `
       <header class="ds-estoque-bolsao-head">
         <span class="ds-estoque-bolsao-title">Bolso ${escapeHtml(b.bolsao)}</span>
         <span class="ds-estoque-bolsao-count mono">${escapeHtml(`${b.occupiedPos}/${b.totalPos}`)}</span>
       </header>
-      <div class="ds-estoque-bolsao-body">
-        <div class="ds-estoque-bolsao-line">
-          <span>Destinos</span>
-          <span class="mono">${destinos}</span>
-        </div>
-        <div class="ds-estoque-bolsao-line">
-          <span>Serviços</span>
-          <span class="mono">${servicos}</span>
-        </div>
-        <div class="ds-estoque-bolsao-line">
-          <span>Cargas</span>
-          <span class="mono">${escapeHtml(String(b.cargas))} · ${escapeHtml(formatNumber(b.kg))} kg</span>
-        </div>
-        <div class="ds-estoque-bolsao-line">
-          <span>Mistos / SHC / Risco</span>
-          <span class="mono">${escapeHtml(String(b.mixed))} · ${escapeHtml(String(b.shc))} · ${escapeHtml(String(b.shcConflict))}</span>
-        </div>
-      </div>
-      <div class="ds-estoque-bolsao-meta">${escapeHtml(`${b.pct} ocupados · ${b.freePos} livres`)}</div>
     `;
+    
+    // Criar barra visual de ocupação
+    const barraDom = document.createElement("div");
+    barraDom.className = "ds-estoque-barra-ocupacao";
+    const fill = document.createElement("div");
+    fill.className = `ds-estoque-barra-fill ${b.pctClass}`;
+    fill.style.width = `${b.pctNum}%`;
+    fill.textContent = b.pctNum > 15 ? `${b.pctNum}%` : "";
+    barraDom.appendChild(fill);
+    card.appendChild(barraDom);
+    
+    // Corpo com informações
+    const body = document.createElement("div");
+    body.className = "ds-estoque-bolsao-body";
+    
+    // Criar linha de destinos com tooltips
+    const destinosLine = document.createElement("div");
+    destinosLine.className = "ds-estoque-bolsao-line";
+    const destLabel = document.createElement("span");
+    destLabel.textContent = "Destinos";
+    destinosLine.appendChild(destLabel);
+    
+    const destContainer = document.createElement("span");
+    destContainer.className = "mono";
+    
+    if (b.destinos === "-") {
+      destContainer.textContent = "-";
+    } else {
+      // Parsear destinos e adicionar tooltips
+      const destArray = b.destinos.split(", ");
+      destArray.forEach((destItem, idx) => {
+        // Extrair código e quantidade: "RBR(13)" -> "RBR", "13"
+        const match = destItem.match(/^(.+?)\((\d+)\)$/);
+        const destSpan = document.createElement("span");
+        destSpan.className = "ds-estoque-destino";
+        destSpan.textContent = destItem;
+        
+        if (match) {
+          const destCode = match[1];
+          const destAddrs = b.destinoAddresses.get(destCode);
+          
+          if (destAddrs && destAddrs.size > 0) {
+            destSpan.classList.add("ds-estoque-destino-tooltip");
+            destSpan.setAttribute("data-bs-toggle", "tooltip");
+            destSpan.setAttribute("data-bs-placement", "top");
+            destSpan.setAttribute("title", Array.from(destAddrs).sort().join(", "));
+          }
+        }
+        
+        destContainer.appendChild(destSpan);
+        
+        // Adicionar vírgula após cada destino, exceto o último
+        if (idx < destArray.length - 1) {
+          const sep = document.createTextNode(", ");
+          destContainer.appendChild(sep);
+        }
+      });
+    }
+    
+    destinosLine.appendChild(destContainer);
+    body.appendChild(destinosLine);
+    
+    // Adicionar outras linhas
+    const otherLines = document.createElement("div");
+    otherLines.innerHTML = `
+      <div class="ds-estoque-bolsao-line">
+        <span>Serviços</span>
+        <span class="mono">${servicos}</span>
+      </div>
+      <div class="ds-estoque-bolsao-line">
+        <span>Cargas</span>
+        <span class="mono">${escapeHtml(String(b.cargas))} · ${escapeHtml(formatNumber(b.kg))} kg</span>
+      </div>
+      <div class="ds-estoque-bolsao-line">
+        <span>Mistos / SHC / Risco</span>
+        <span class="mono">${escapeHtml(String(b.mixed))} · ${escapeHtml(String(b.shc))} · ${escapeHtml(String(b.shcConflict))}</span>
+      </div>
+    `;
+    body.appendChild(otherLines);
+    card.appendChild(body);
+    
+    // Meta
+    const meta = document.createElement("div");
+    meta.className = "ds-estoque-bolsao-meta";
+    meta.textContent = `${b.pct} ocupados · ${b.freePos} livres`;
+    card.appendChild(meta);
+    
     bolsaoList.appendChild(card);
   }
   frag.appendChild(bolsaoList);
 
-  body.appendChild(frag);
+  panelBody.appendChild(frag);
+  
+  // Inicializar tooltips Bootstrap
+  document.querySelectorAll(".ds-estoque-destino-tooltip").forEach(el => {
+    new bootstrap.Tooltip(el);
+  });
 }
 
 // ========== VOOS ==========
