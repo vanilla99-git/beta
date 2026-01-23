@@ -1,4 +1,4 @@
-﻿const REGEX_ENDERECO = /^[A-Z]\d{2}[A-Z]$/;
+const REGEX_ENDERECO = /^[A-Z]\d{2}[A-Z]$/;
 const REGEX_CARRETA = /^1K[0-9A-Z]+$/;
 const DESTINOS_IGNORADOS = new Set(["BSB", "DFV", "CBS"]); // Cargas da loja
 const DESTINOS_LOJA = DESTINOS_IGNORADOS; // Alias para melhor legibilidade
